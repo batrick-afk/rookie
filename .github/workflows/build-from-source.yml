@@ -23,17 +23,17 @@ jobs:
 
     steps:
       - name: Checkout rookie source at requested ref
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: VRPirates/rookie
           ref: ${{ inputs.ref }}
           path: source
 
       - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@v3
 
       - name: Setup NuGet CLI
-        uses: NuGet/setup-nuget@v2
+        uses: NuGet/setup-nuget@v3
 
       - name: Restore NuGet packages
         working-directory: source
