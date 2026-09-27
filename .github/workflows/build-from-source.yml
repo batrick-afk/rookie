@@ -1,0 +1,94 @@
+name: Build Rookie from Source
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Tag, branch, or commit of VRPirates/rookie to build
+        required: true
+        default: v3.1
+        type: string
+      compare_release:
+        description: Also download the matching official release for hash comparison
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout rookie source at requested ref
+        uses: actions/checkout@v4
+        with:
+          repository: VRPirates/rookie
+          ref: ${{ inputs.ref }}
+          path: source
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup NuGet CLI
+        uses: NuGet/setup-nuget@v2
+
+      - name: Restore NuGet packages
+        working-directory: source
+        run: nuget restore AndroidSideloader.sln
+
+      - name: Build (Release)
+        working-directory: source
+        run: msbuild AndroidSideloader.sln /t:AndroidSideloader /p:Configuration=Release
+
+      - name: Locate build output
+        id: locate
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path source -Recurse -Filter AndroidSideloader.exe |
+            Where-Object { $_.FullName -notmatch '[\\/]obj[\\/]' } |
+            Select-Object -First 1
+          if (-not $exe) {
+            throw 'Build did not produce AndroidSideloader.exe - check the build step log above.'
+          }
+          "exe_path=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Hash the exe I just built
+        shell: pwsh
+        run: |
+          $hash = Get-FileHash -Algorithm SHA256 -Path "${{ steps.locate.outputs.exe_path }}"
+          "### Built from source (ref: ${{ inputs.ref }})" >> $env:GITHUB_STEP_SUMMARY
+          "- File: $($hash.Path)" >> $env:GITHUB_STEP_SUMMARY
+          "- SHA256: ``$($hash.Hash)``" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload built exe as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rookie-built-from-source-${{ inputs.ref }}
+          path: ${{ steps.locate.outputs.exe_path }}
+
+      - name: Download the matching official release assets
+        if: ${{ inputs.compare_release }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release download "${{ inputs.ref }}" --repo VRPirates/rookie --dir official-release
+
+      - name: Hash official release assets
+        if: ${{ inputs.compare_release }}
+        shell: pwsh
+        run: |
+          "### Official release assets (tag: ${{ inputs.ref }})" >> $env:GITHUB_STEP_SUMMARY
+          Get-ChildItem -Path official-release -Recurse -File | ForEach-Object {
+            $hash = Get-FileHash -Algorithm SHA256 -Path $_.FullName
+            "- $($_.Name): ``$($hash.Hash)``" >> $env:GITHUB_STEP_SUMMARY
+          }
+
+      - name: Upload official release assets as artifact
+        if: ${{ inputs.compare_release }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-release-${{ inputs.ref }}
+          path: official-release/**
